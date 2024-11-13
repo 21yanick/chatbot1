@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 import asyncio
 from functools import lru_cache
 import numpy as np
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_openai import OpenAIEmbeddings
 from ..interfaces.base import BaseService, ServiceError
 from ..config.settings import settings
 from ..config.logging_config import get_logger

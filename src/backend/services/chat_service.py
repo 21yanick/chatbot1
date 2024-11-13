@@ -2,7 +2,7 @@ from typing import List, Dict, Any, Optional
 import asyncio
 from uuid import uuid4
 from datetime import datetime
-from langchain.chat_models import ChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import SystemMessage, HumanMessage, AIMessage
 from ..models.chat import ChatSession, Message
@@ -50,6 +50,27 @@ class ChatServiceImpl(ChatService):
         await self.retrieval_service.cleanup()
         self._sessions.clear()
         self._llm = None
+        
+        
+    async def update_session_metadata(
+        self,
+        session_id: str,
+        metadata: Dict[str, Any]
+    ) -> Optional[ChatSession]:
+        """Update session metadata."""
+        try:
+            session = await self.get_session(session_id)
+            if not session:
+                return None
+
+            # Update metadata
+            session.metadata.update(metadata)
+        
+            # Return updated session
+            return session
+        
+        except Exception as e:
+            raise ChatServiceError(f"Failed to update session metadata: {str(e)}")
     
     async def create_session(
         self,
@@ -97,19 +118,24 @@ class ChatServiceImpl(ChatService):
             session = await self.get_session(session_id)
             if not session:
                 raise ChatServiceError(f"Session not found: {session_id}")
-            
+        
             session.add_message(message)
-            
+        
             if update_context and message.role == "user":
                 # Update context documents based on user message
-                relevant_docs = await self.retrieval_service.search_documents(
-                    query=message.content,
-                    limit=3
-                )
-                session.metadata["context_documents"] = [
-                    doc.id for doc in relevant_docs
-                ]
-            
+                try:
+                    relevant_docs = await self.retrieval_service.search_documents(
+                        query=message.content,
+                        limit=3
+                    )
+                    if relevant_docs:  # Nur wenn Dokumente gefunden wurden
+                        session.metadata["context_documents"] = [
+                            doc.id for doc in relevant_docs
+                        ]
+                except Exception as e:
+                    logger.warning(f"Could not retrieve context documents: {str(e)}")
+                    # Fahre ohne Kontext fort
+        
             return session
         
         except Exception as e:
@@ -225,12 +251,19 @@ Answer in the same language as the question. Be concise but thorough."""
             await self.add_message(session.id, user_message)
             
             # Get context documents if not provided
+            context_docs = []
             if context is None and session.metadata.get("context_documents"):
-                context = []
                 for doc_id in session.metadata["context_documents"]:
-                    doc = await self.retrieval_service.get_document(doc_id)
-                    if doc:
-                        context.append(doc)
+                    try:
+                        doc = await self.retrieval_service.get_document(doc_id)
+                        if doc:
+                            context_docs.append(doc)
+                    except Exception as e:
+                        logger.warning(f"Could not retrieve document {doc_id}: {str(e)}")
+                        continue
+        
+            # Use provided context or found context_docs
+            context = context or context_docs
             
             # Prepare prompt inputs
             context_str = self._prepare_context(context or [])

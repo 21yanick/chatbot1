@@ -1,8 +1,9 @@
 from typing import Optional, List, Dict, Any
 import chromadb
-from chromadb.config import Settings
+from chromadb.config import Settings as ChromaSettings
 from chromadb.api import Collection
 from contextlib import asynccontextmanager
+from ..config.settings import settings
 
 class DatabaseError(Exception):
     """Base exception for database-related errors."""
@@ -13,11 +14,11 @@ class ChromaDBManager:
     
     def __init__(
         self,
-        persist_directory: str = "./data/chromadb",
-        collection_name: str = "documents"
+        persist_directory: Optional[str] = None,
+        collection_name: Optional[str] = None
     ):
-        self.persist_directory = persist_directory
-        self.collection_name = collection_name
+        self.persist_directory = persist_directory or settings.database.persist_directory
+        self.collection_name = collection_name or settings.database.collection_name
         self._client = None
         self._collection = None
     
@@ -26,7 +27,7 @@ class ChromaDBManager:
         try:
             self._client = chromadb.PersistentClient(
                 path=self.persist_directory,
-                settings=Settings(
+                settings=ChromaSettings(
                     anonymized_telemetry=False,
                     allow_reset=True
                 )
