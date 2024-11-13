@@ -20,7 +20,7 @@ class ChatServiceImpl(ChatService):
     def __init__(
         self,
         retrieval_service: RetrievalServiceImpl,
-        model_name: str = "gpt-4",
+        model_name: str = "gpt-4o-mini",
         temperature: float = 0.7,
         max_tokens: int = 1000
     ):
