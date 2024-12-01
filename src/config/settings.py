@@ -115,7 +115,10 @@ class ChatSettings(BaseModel):
         default=True,
         description="Streaming-Antworten aktivieren"
     )
-
+    min_input_delay: float = Field(
+        default=1.0,
+        description="Minimale Wartezeit zwischen Eingaben in Sekunden"
+    )
 class APISettings(BaseModel):
     """
     API-Konfiguration.
