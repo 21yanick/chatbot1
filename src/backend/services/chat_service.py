@@ -29,7 +29,7 @@ logger = get_logger(__name__)
 
 class ChatServiceImpl(ChatService):
     """
-    Implementierung des Chat-Services mit LangChain und GPT-4.
+    Implementierung des Chat-Services mit LangChain und 4.
     
     Verwaltet Chat-Sessions, verarbeitet Benutzeranfragen und generiert
     kontextbezogene Antworten unter Verwendung von LLMs.
@@ -38,23 +38,23 @@ class ChatServiceImpl(ChatService):
     def __init__(
         self,
         retrieval_service: RetrievalServiceImpl,
-        model_name: str = "gpt-4o-mini",
-        temperature: float = 0.7,
-        max_tokens: int = 1000
+        model_name: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None
     ):
         """
         Initialisiert den Chat-Service.
         
         Args:
             retrieval_service: Service für Dokumenten-Retrieval
-            model_name: Name des zu verwendenden LLM-Modells
-            temperature: Kreativität des Modells (0-1)
-            max_tokens: Maximale Token-Länge der Antworten
+            model_name: Optional - Name des zu verwendenden LLM-Modells, default aus settings
+            temperature: Optional - Kreativität des Modells (0-1), default aus settings
+            max_tokens: Optional - Maximale Token-Länge der Antworten, default aus settings
         """
         self.retrieval_service = retrieval_service
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
+        self.model_name = model_name or settings.api.openai_model
+        self.temperature = temperature or settings.chat.temperature
+        self.max_tokens = max_tokens or settings.chat.max_tokens
         self._llm = None
         self._sessions: Dict[str, ChatSession] = {}
         self._lock = asyncio.Lock()

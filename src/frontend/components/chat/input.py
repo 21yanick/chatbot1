@@ -246,6 +246,29 @@ class ChatInput:
         """
         try:
             with log_execution_time(self.logger, "component_rendering"):
+                # Input-spezifisches CSS
+                st.markdown("""
+                    <style>
+                        /* Entfernt zusätzliche Abstände im Input-Container */
+                        .stChatInput {
+                            padding: 0 !important;
+                            margin: 0 !important;
+                        }
+                        
+                        /* Optimiert die Input-Höhe */
+                        .stChatInput input {
+                            margin: 0 !important;
+                            padding: 0.5rem !important;
+                        }
+                        
+                        /* Entfernt überschüssige Abstände nach dem Input */
+                        .stChatInput ~ div {
+                            margin: 0 !important;
+                            padding: 0 !important;
+                        }
+                    </style>
+                """, unsafe_allow_html=True)
+                
                 # Container für Chat-Eingabe
                 with st.container():
                     # Native Streamlit Chat-Eingabe

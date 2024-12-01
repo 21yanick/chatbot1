@@ -460,7 +460,7 @@ class ChatApplication:
                         [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
                             height: calc(100vh - 180px);
                             overflow-y: auto;
-                            padding-bottom: 100px;
+                            padding-bottom: 80px;  /* Reduziert von 100px */
                         }
                         
                         /* Chat-Input fixiert am unteren Rand */
@@ -469,24 +469,63 @@ class ChatApplication:
                             bottom: 0;
                             left: 0;
                             right: 0;
-                            padding: 1rem 2rem;
+                            padding: 0.5rem 2rem;  /* Reduziert von 1rem */
                             background: var(--background-color);
                             border-top: 1px solid rgba(49, 51, 63, 0.2);
                             backdrop-filter: blur(10px);
                             z-index: 100;
+                            margin-bottom: 0 !important;  /* Entfernt zusätzlichen Abstand unten */
                         }
                         
                         /* Streamlit Container-Anpassungen */
                         .stChatMessage {
-                            margin-bottom: 1rem;
+                            margin-bottom: 0.5rem !important;  /* Reduziert von 1rem */
+                        }
+                        
+                        /* Reduziert den Abstand nach Chat-Nachrichten */
+                        .stChatMessage .element-container {
+                            margin-bottom: 0.25rem !important;
+                        }
+                        
+                        /* Entfernt überschüssigen Abstand nach Checkboxen */
+                        .stChatMessage [data-testid="stVerticalBlock"] {
+                            gap: 0.25rem !important;
                         }
                         
                         /* Stelle sicher, dass neue Nachrichten immer sichtbar sind */
                         .element-container:last-child {
-                            margin-bottom: 100px;
+                            margin-bottom: 80px;  /* Reduziert von 100px */
+                        }
+                        /* Chat-Input fixiert am unteren Rand */
+                        .stChatInputContainer {
+                            position: fixed;
+                            bottom: 0;
+                            left: 0;
+                            right: 0;
+                            padding: 0.5rem 2rem;
+                            background: var(--background-color);
+                            border-top: 1px solid rgba(49, 51, 63, 0.2);
+                            backdrop-filter: blur(10px);
+                            z-index: 100;
+                            margin: 0 !important;  /* Entfernt ALLE Margins */
+                        }
+                        
+                        /* Entfernt zusätzliche Container-Margins */
+                        .stChatInputContainer > div {
+                            margin: 0 !important;
+                        }
+                        
+                        /* Entfernt den Standard-Streamlit-Abstand am Ende */
+                        footer {
+                            display: none !important;
+                        }
+                        
+                        /* Anpasst den Hauptcontainer-Abstand */
+                        [data-testid="stVerticalBlock"] > [data-testid="stVerticalBlock"] {
+                            padding-bottom: 60px;  /* Reduziert von 80px */
                         }
                     </style>
-                """, unsafe_allow_html=True)
+""", unsafe_allow_html=True)
                 
                 # Fehler anzeigen falls vorhanden
                 if self.state_manager.has_error():
