@@ -180,20 +180,26 @@ class StateManager:
         return messages
 
     @log_function_call(logger)
-    async def send_message(self, content: str) -> Optional[Message]:
+    async def send_message(self, content: str):
         """
-        Sendet eine Nachricht und holt die Antwort vom Chatbot.
-        
+        Sendet eine Nachricht und streamt die Antwort vom Chatbot.
+    
+        Verarbeitet die Benutzereingabe und gibt die Antwort
+        als asynchronen Stream zurück.
+    
         Args:
             content: Nachrichteninhalt
             
-        Returns:
-            Optional[Message]: Die Antwort des Chatbots oder None bei Fehler
+        Yields:
+            str: Chunks der Chatbot-Antwort
+        
+        Raises:
+            Exception: Bei Fehlern in der Nachrichtenverarbeitung
         """
         try:
             if not content.strip():
                 self.logger.debug("Leere Nachricht ignoriert")
-                return None
+                return
                 
             with request_context():
                 with log_execution_time(self.logger, "message_processing"):
@@ -214,20 +220,33 @@ class StateManager:
                     st.session_state.metrics["messages_sent"] += 1
                     st.session_state.last_activity = datetime.utcnow().isoformat()
                     
-                    # Antwort vom Chat-Service holen
+                    # Antwort vom Chat-Service als Stream verarbeiten
                     start_time = datetime.utcnow()
                     chat_service: ChatServiceImpl = st.session_state.chat_service
-                    response = await chat_service.get_response(
+                    full_response = ""
+                    
+                    async for chunk in chat_service.get_response(
                         query=content,
                         session_id=st.session_state.session_id
-                    )
+                    ):
+                        full_response += chunk
+                        yield chunk
                     
                     # Response-Zeit messen
                     response_time = (datetime.utcnow() - start_time).total_seconds()
                     st.session_state.metrics["last_response_time"] = response_time
                     
-                    # Antwort zum Chat-Verlauf hinzufügen
-                    st.session_state.chat_history.append(response)
+                    # Vollständige Antwort zum Chat-Verlauf hinzufügen
+                    assistant_message = Message(
+                        content=full_response,
+                        role="assistant",
+                        metadata={
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "response_time": response_time,
+                            "session_id": st.session_state.session_id
+                        }
+                    )
+                    st.session_state.chat_history.append(assistant_message)
                     
                     self.logger.info(
                         "Nachricht erfolgreich verarbeitet",
@@ -235,11 +254,9 @@ class StateManager:
                             "session_id": st.session_state.session_id,
                             "response_time": response_time,
                             "message_length": len(content),
-                            "response_length": len(response.content)
+                            "response_length": len(full_response)
                         }
                     )
-                    
-                    return response
         
         except Exception as e:
             error_context = {
@@ -255,7 +272,7 @@ class StateManager:
             )
             st.session_state.metrics["errors_occurred"] += 1
             st.session_state.error = f"Fehler bei der Verarbeitung: {str(e)}"
-            return None
+            raise
 
     @log_function_call(logger)
     def clear_chat(self) -> None:

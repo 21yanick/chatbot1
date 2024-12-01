@@ -3,7 +3,7 @@ Chat-Service-Modul für die Verarbeitung von Benutzeranfragen und Konversationen
 Implementiert die Kernlogik für den dialogbasierten Zugriff auf Fachinformationen.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import AsyncGenerator, List, Dict, Any, Optional
 import asyncio
 from uuid import uuid4
 from datetime import datetime
@@ -482,20 +482,22 @@ class ChatServiceImpl(ChatService):
         query: str,
         session_id: Optional[str] = None,
         context: Optional[List[Document]] = None
-    ) -> Message:
+    ) -> AsyncGenerator[str, None]:
         """
-        Generiert eine Antwort des Assistenten.
-        
+        Generiert eine Antwort des Assistenten als Stream.
+    
         Verarbeitet die Benutzeranfrage unter Berücksichtigung des Kontexts
         und der Chat-Historie, um eine passende Antwort zu generieren.
-        
+        Die Antwort wird als Stream zurückgegeben, um eine flüssigere
+        Benutzererfahrung zu ermöglichen.
+    
         Args:
             query: Benutzeranfrage
             session_id: Optionale Session-ID für Kontext
             context: Optionale Liste von Kontext-Dokumenten
             
-        Returns:
-            Generierte Antwortnachricht
+        Yields:
+            str: Antwort-Chunks im Stream
             
         Raises:
             ChatServiceError: Bei Fehlern in der Antwortgenerierung
@@ -509,14 +511,14 @@ class ChatServiceImpl(ChatService):
                         session = await self.get_session(session_id)
                     if not session:
                         session = await self.create_session(session_id)
-                    
-                    # Benutzernachricht erstellen
+                
+                    # Benutzernachricht erstellen und hinzufügen
                     user_message = Message(
                         content=query,
                         role="user"
                     )
                     await self.add_message(session.id, user_message)
-                    
+                
                     # Kontextdokumente abrufen
                     context_docs = []
                     if context is None and session.metadata.get("context_documents"):
@@ -534,17 +536,17 @@ class ChatServiceImpl(ChatService):
                                     }
                                 )
                                 continue
-                    
+                
                     # Kontext vorbereiten
                     context = context or context_docs
                     context_str = self._prepare_context(context or [])
                     chat_history = self._format_chat_history(
                         session.get_context(settings.chat.max_context_messages)
                     )
-                    
+                
                     # Prompt erstellen und formatieren
                     prompt = self._create_prompt(query, context_str, chat_history)
-                    
+                
                     self.logger.debug(
                         "Prompt vorbereitet",
                         extra={
@@ -552,22 +554,31 @@ class ChatServiceImpl(ChatService):
                             "history_length": len(chat_history)
                         }
                     )
-                    
-                    # LLM-Antwort generieren
-                    with log_execution_time(self.logger, "llm_response"):
-                        response = await asyncio.to_thread(
-                            self._llm.invoke,
-                            [SystemMessage(content=prompt.messages[0].content.format(
-                                query=query,
-                                context=context_str,
-                                chat_history=chat_history
-                                ))
-                            ]
-                        )
-                    
-                    # Assistenten-Nachricht erstellen
+                
+                    # Streaming LLM konfigurieren
+                    streaming_llm = ChatOpenAI(
+                        model_name=self.model_name,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        streaming=True
+                    )
+                
+                    # Antwort generieren und streamen
+                    response_chunks = []
+                    async for chunk in streaming_llm.astream([
+                        SystemMessage(content=prompt.messages[0].content.format(
+                            query=query,
+                            context=context_str,
+                            chat_history=chat_history
+                        ))
+                    ]):
+                        response_chunks.append(chunk.content)
+                        yield chunk.content
+                
+                    # Vollständige Antwort zusammenbauen und speichern
+                    complete_response = "".join(response_chunks)
                     assistant_message = Message(
-                        content=response.content,
+                        content=complete_response,
                         role="assistant",
                         metadata={
                             "context_documents": [doc.id for doc in (context or [])],
@@ -576,21 +587,19 @@ class ChatServiceImpl(ChatService):
                             "response_time": datetime.utcnow().isoformat()
                         }
                     )
-                    
+                
                     # Zur Session hinzufügen
                     await self.add_message(session.id, assistant_message, update_context=False)
-                    
+                
                     self.logger.info(
                         f"Antwort generiert",
                         extra={
                             "session_id": session.id,
-                            "response_length": len(assistant_message.content),
+                            "response_length": len(complete_response),
                             "context_docs_used": len(context or [])
                         }
                     )
-                    
-                    return assistant_message
-            
+                
         except Exception as e:
             error_context = {
                 "session_id": session_id,
