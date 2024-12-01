@@ -1,46 +1,118 @@
-# src/backend/services/embedding_service.py
+"""
+Embedding-Service-Modul.
+Verantwortlich für die Generierung und Verwaltung von Text-Embeddings mittels OpenAI.
+"""
 
 from typing import List, Dict, Any, Optional
 import asyncio
 from functools import lru_cache
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
-from ..interfaces.base import BaseService, ServiceError
-from ..config.settings import settings
-from ..config.logging_config import get_logger
 
+from src.config.settings import settings
+from src.config.logging_config import (
+    get_logger, 
+    log_execution_time,
+    log_error_with_context,
+    request_context,
+    log_function_call
+)
+
+from ..interfaces.base import BaseService, ServiceError
+
+# Logger für dieses Modul initialisieren
 logger = get_logger(__name__)
 
 class EmbeddingCache:
-    """Simple cache implementation for embeddings."""
+    """
+    Cache-Implementierung für Embeddings.
+    
+    Bietet Thread-sicheres Caching von Embedding-Vektoren zur 
+    Vermeidung redundanter API-Aufrufe.
+    """
+    
     def __init__(self, max_size: int = 10000):
+        """
+        Initialisiert den Embedding-Cache.
+        
+        Args:
+            max_size: Maximale Anzahl der zu cachenden Embeddings
+        """
         self.cache: Dict[str, List[float]] = {}
         self.max_size = max_size
         self._lock = asyncio.Lock()
+        self.logger = get_logger(f"{__name__}.EmbeddingCache")
 
     async def get(self, key: str) -> Optional[List[float]]:
-        """Get embedding from cache."""
+        """
+        Ruft ein Embedding aus dem Cache ab.
+        
+        Args:
+            key: Cache-Schlüssel (normalerweise der Text)
+            
+        Returns:
+            Gecachter Embedding-Vektor oder None wenn nicht gefunden
+        """
         async with self._lock:
-            return self.cache.get(key)
+            if embedding := self.cache.get(key):
+                self.logger.debug(
+                    "Cache-Treffer",
+                    extra={"key_length": len(key)}
+                )
+                return embedding
+            
+            self.logger.debug(
+                "Cache-Miss",
+                extra={"key_length": len(key)}
+            )
+            return None
 
     async def set(self, key: str, value: List[float]) -> None:
-        """Set embedding in cache."""
+        """
+        Speichert ein Embedding im Cache.
+        
+        Args:
+            key: Cache-Schlüssel
+            value: Zu cachender Embedding-Vektor
+        """
         async with self._lock:
             if len(self.cache) >= self.max_size:
-                # Remove oldest item if cache is full
-                self.cache.pop(next(iter(self.cache)))
+                # Ältesten Eintrag entfernen wenn Cache voll
+                oldest_key = next(iter(self.cache))
+                del self.cache[oldest_key]
+                self.logger.debug(
+                    "Cache-Eintrag entfernt",
+                    extra={"removed_key_length": len(oldest_key)}
+                )
+            
             self.cache[key] = value
+            self.logger.debug(
+                "Cache-Eintrag hinzugefügt",
+                extra={
+                    "cache_size": len(self.cache),
+                    "key_length": len(key)
+                }
+            )
 
     def clear(self) -> None:
-        """Clear the cache."""
+        """Leert den Cache."""
+        self.logger.info(
+            "Cache geleert",
+            extra={"cleared_entries": len(self.cache)}
+        )
         self.cache.clear()
 
 class EmbeddingServiceError(ServiceError):
-    """Specific exception for embedding service errors."""
+    """Spezifische Exception für Embedding-Service-Fehler."""
     pass
 
 class EmbeddingService(BaseService):
-    """Service for generating and managing embeddings."""
+    """
+    Service für die Generierung und Verwaltung von Embeddings.
+    
+    Verwendet OpenAI Embeddings mit integriertem Caching und
+    Fehlerbehandlung für robuste Vektorisierung von Texten.
+    """
     
     def __init__(
         self,
@@ -49,107 +121,234 @@ class EmbeddingService(BaseService):
         cache_size: int = 10000,
         embeddings = None
     ):
+        """
+        Initialisiert den Embedding-Service.
+        
+        Args:
+            model: Name des OpenAI Embedding-Modells
+            batch_size: Maximale Batch-Größe für API-Anfragen
+            cache_size: Größe des Embedding-Caches
+            embeddings: Optionales vorkonfiguriertes Embedding-Modell
+        """
         self.model = model
         self.batch_size = batch_size
         self._embeddings = embeddings
         self._cache = EmbeddingCache(max_size=cache_size)
         self._lock = asyncio.Lock()
+        self.logger = get_logger(f"{__name__}.{self.__class__.__name__}")
     
+    @log_function_call(logger)
     async def initialize(self) -> None:
-        """Initialize the embedding service."""
+        """
+        Initialisiert den Embedding-Service.
+        
+        Raises:
+            EmbeddingServiceError: Bei Initialisierungsfehlern
+        """
         try:
-            if not self._embeddings:
-                self._embeddings = OpenAIEmbeddings(
-                    model=self.model
-                )
-            logger.info(f"Initialized embedding service with model: {self.model}")
+            with log_execution_time(self.logger, "embedding_initialization"):
+                if not self._embeddings:
+                    self._embeddings = OpenAIEmbeddings(
+                        model=self.model
+                    )
+                    
+            self.logger.info(
+                "Embedding-Service initialisiert",
+                extra={
+                    "model": self.model,
+                    "batch_size": self.batch_size
+                }
+            )
+            
         except Exception as e:
-            raise EmbeddingServiceError(f"Failed to initialize embedding service: {str(e)}")
+            error_context = {
+                "model": self.model
+            }
+            log_error_with_context(
+                self.logger,
+                e,
+                error_context,
+                "Fehler bei Embedding-Service-Initialisierung"
+            )
+            raise EmbeddingServiceError(f"Initialisierung fehlgeschlagen: {str(e)}")
     
+    @log_function_call(logger)
     async def cleanup(self) -> None:
-        """Cleanup service resources."""
+        """Bereinigt Service-Ressourcen."""
         self._embeddings = None
         self._cache.clear()
+        self.logger.info("Embedding-Service-Ressourcen bereinigt")
 
+    @log_function_call(logger)
     async def get_embeddings(
         self,
         texts: List[str],
         retry_attempts: int = 3,
         retry_delay: float = 1.0
     ) -> List[List[float]]:
-        """Get embeddings for a list of texts with retry logic."""
+        """
+        Generiert Embeddings für eine Liste von Texten mit Retry-Logik.
+        
+        Args:
+            texts: Liste der zu verarbeitenden Texte
+            retry_attempts: Maximale Anzahl von Wiederholungsversuchen
+            retry_delay: Verzögerung zwischen Wiederholungsversuchen in Sekunden
+            
+        Returns:
+            Liste von Embedding-Vektoren
+            
+        Raises:
+            EmbeddingServiceError: Bei Fehlern in der Embedding-Generierung
+        """
         if not self._embeddings:
-            raise EmbeddingServiceError("Embedding service not initialized")
+            raise EmbeddingServiceError("Embedding-Service nicht initialisiert")
         
         async with self._lock:
             try:
-                # Check cache first
-                cached_results = []
-                missing_indices = []
-                
-                for i, text in enumerate(texts):
-                    cached = await self._cache.get(text)
-                    if cached is not None:
-                        cached_results.append(cached)
-                    else:
-                        cached_results.append(None)
-                        missing_indices.append(i)
-                
-                if not missing_indices:
+                with log_execution_time(self.logger, "batch_embedding_generation"):
+                    # Cache-Check
+                    cached_results = []
+                    missing_indices = []
+                    
+                    for i, text in enumerate(texts):
+                        if cached := await self._cache.get(text):
+                            cached_results.append(cached)
+                        else:
+                            cached_results.append(None)
+                            missing_indices.append(i)
+                    
+                    if not missing_indices:
+                        self.logger.info(
+                            "Alle Embeddings im Cache gefunden",
+                            extra={"total_texts": len(texts)}
+                        )
+                        return [r for r in cached_results if r is not None]
+                    
+                    # Fehlende Embeddings in Batches verarbeiten
+                    missing_texts = [texts[i] for i in missing_indices]
+                    all_embeddings = []
+                    
+                    for i in range(0, len(missing_texts), self.batch_size):
+                        batch = missing_texts[i:i + self.batch_size]
+                        
+                        for attempt in range(retry_attempts):
+                            try:
+                                with log_execution_time(self.logger, "api_call"):
+                                    batch_embeddings = self._embeddings.embed_documents(batch)
+                                    
+                                all_embeddings.extend(batch_embeddings)
+                                break
+                                
+                            except Exception as e:
+                                if attempt == retry_attempts - 1:
+                                    raise EmbeddingServiceError(
+                                        f"Embedding-Generierung nach {retry_attempts} "
+                                        f"Versuchen fehlgeschlagen: {str(e)}"
+                                    )
+                                    
+                                self.logger.warning(
+                                    f"Embedding-Versuch {attempt + 1} fehlgeschlagen",
+                                    extra={
+                                        "attempt": attempt + 1,
+                                        "max_attempts": retry_attempts,
+                                        "batch_size": len(batch)
+                                    }
+                                )
+                                await asyncio.sleep(retry_delay * (attempt + 1))
+                    
+                    # Cache aktualisieren und Ergebnisse zusammenführen
+                    for i, embedding in zip(missing_indices, all_embeddings):
+                        await self._cache.set(texts[i], embedding)
+                        cached_results[i] = embedding
+                    
+                    self.logger.info(
+                        "Embeddings generiert",
+                        extra={
+                            "total_texts": len(texts),
+                            "cache_hits": len(texts) - len(missing_indices),
+                            "newly_generated": len(missing_indices)
+                        }
+                    )
+                    
                     return [r for r in cached_results if r is not None]
                 
-                # Process missing embeddings in batches
-                missing_texts = [texts[i] for i in missing_indices]
-                all_embeddings = []
-                
-                for i in range(0, len(missing_texts), self.batch_size):
-                    batch = missing_texts[i:i + self.batch_size]
-                    for attempt in range(retry_attempts):
-                        try:
-                            # Direkt die synchrone Methode aufrufen
-                            batch_embeddings = self._embeddings.embed_documents(batch)
-                            all_embeddings.extend(batch_embeddings)
-                            break
-                        except Exception as e:
-                            if attempt == retry_attempts - 1:
-                                raise EmbeddingServiceError(
-                                    f"Failed to get embeddings after {retry_attempts} attempts: {str(e)}"
-                                )
-                            logger.warning(
-                                f"Embedding attempt {attempt + 1} failed, retrying..."
-                            )
-                            await asyncio.sleep(retry_delay * (attempt + 1))
-                
-                # Update cache and results
-                for i, embedding in zip(missing_indices, all_embeddings):
-                    await self._cache.set(texts[i], embedding)
-                    cached_results[i] = embedding
-                
-                return [r for r in cached_results if r is not None]
-                
             except Exception as e:
-                raise EmbeddingServiceError(f"Failed to get embeddings: {str(e)}")
+                error_context = {
+                    "total_texts": len(texts),
+                    "batch_size": self.batch_size
+                }
+                log_error_with_context(
+                    self.logger,
+                    e,
+                    error_context,
+                    "Fehler bei Embedding-Generierung"
+                )
+                raise EmbeddingServiceError(f"Embedding-Generierung fehlgeschlagen: {str(e)}")
 
+    @log_function_call(logger)
     async def get_embedding(
         self,
         text: str,
         retry_attempts: int = 3
     ) -> List[float]:
-        """Get embedding for a single text."""
+        """
+        Generiert ein Embedding für einen einzelnen Text.
+        
+        Args:
+            text: Zu verarbeitender Text
+            retry_attempts: Maximale Anzahl von Wiederholungsversuchen
+            
+        Returns:
+            Embedding-Vektor
+            
+        Raises:
+            EmbeddingServiceError: Bei Fehlern in der Embedding-Generierung
+        """
         embeddings = await self.get_embeddings([text], retry_attempts)
         return embeddings[0]
     
+    @log_function_call(logger)
     def similarity_score(
         self,
         embedding1: List[float],
         embedding2: List[float]
     ) -> float:
-        """Calculate cosine similarity between two embeddings."""
+        """
+        Berechnet die Kosinus-Ähnlichkeit zwischen zwei Embeddings.
+        
+        Args:
+            embedding1: Erster Embedding-Vektor
+            embedding2: Zweiter Embedding-Vektor
+            
+        Returns:
+            Ähnlichkeitswert zwischen 0 und 1
+            
+        Raises:
+            EmbeddingServiceError: Bei Berechnungsfehlern
+        """
         try:
-            a = np.array(embedding1)
-            b = np.array(embedding2)
-            return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+            with log_execution_time(self.logger, "similarity_calculation"):
+                a = np.array(embedding1)
+                b = np.array(embedding2)
+                similarity = float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+                
+                self.logger.debug(
+                    "Ähnlichkeit berechnet",
+                    extra={"similarity_score": similarity}
+                )
+                return similarity
+                
         except Exception as e:
+            error_context = {
+                "vector1_size": len(embedding1),
+                "vector2_size": len(embedding2)
+            }
+            log_error_with_context(
+                self.logger,
+                e,
+                error_context,
+                "Fehler bei Ähnlichkeitsberechnung"
+            )
             raise EmbeddingServiceError(
-                f"Failed to calculate similarity score: {str(e)}"
+                f"Ähnlichkeitsberechnung fehlgeschlagen: {str(e)}"
             )
