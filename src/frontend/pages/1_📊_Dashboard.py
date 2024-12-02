@@ -3,7 +3,7 @@ Developer Dashboard - Entwickler-Übersichtsseite
 
 Bietet Monitoring und Debug-Funktionen für:
 - Service Status und Performance
-- Log Monitoring
+- Log Monitoring 
 - System Metriken
 - Entwickler Tools
 """
@@ -24,7 +24,8 @@ from src.config.logging_config import (
     log_execution_time,
     log_error_with_context,
     request_context,
-    log_function_call
+    log_function_call,
+    setup_logging
 )
 
 # Logger für dieses Modul initialisieren
@@ -37,6 +38,13 @@ st.set_page_config(
     layout="wide"
 )
 
+# Logging Setup initialisieren
+setup_logging(
+    debug=st.session_state.get("debug_mode", False),
+    log_dir="logs",
+    enable_performance_logging=True
+)
+
 class DeveloperDashboard:
     """Developer Dashboard Komponente."""
     
@@ -47,7 +55,12 @@ class DeveloperDashboard:
         
     @log_function_call(logger)
     async def initialize(self) -> bool:
-        """Initialisiert das Dashboard und seine Abhängigkeiten."""
+        """
+        Initialisiert das Dashboard und seine Abhängigkeiten.
+        
+        Returns:
+            bool: True wenn die Initialisierung erfolgreich war, sonst False
+        """
         try:
             with log_execution_time(self.logger, "dashboard_initialization"):
                 await self.state_manager.initialize()
@@ -62,7 +75,10 @@ class DeveloperDashboard:
             return False
 
     def _render_service_status(self) -> None:
-        """Rendert die Service-Status-Übersicht."""
+        """
+        Rendert die Service-Status-Übersicht.
+        Zeigt den aktuellen Status aller Services in einer übersichtlichen Grid-Ansicht.
+        """
         st.markdown("### 🔌 Service Status")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -105,10 +121,11 @@ class DeveloperDashboard:
             try:
                 embedding_service = st.session_state.get("embedding_service")
                 status = "🟢 Active" if embedding_service else "🔴 Inactive"
+                queue_size = 0  # TODO: Implement queue tracking
                 st.info(
                     "Embedding Service\n\n"
                     f"Status: {status}\n"
-                    "Queue: 0"  # TODO: Implement queue tracking
+                    f"Queue: {queue_size}"
                 )
             except Exception as e:
                 st.error("Embedding Service\n\nStatus: Error")
@@ -119,110 +136,127 @@ class DeveloperDashboard:
             try:
                 doc_processor = st.session_state.get("document_processor")
                 status = "🟢 Active" if doc_processor else "🔴 Inactive"
+                processing_count = 0  # TODO: Implement doc processing tracking
                 st.info(
                     "Document Processor\n\n"
                     f"Status: {status}\n"
-                    "Processing: 0 docs"  # TODO: Implement doc processing tracking
+                    f"Processing: {processing_count} docs"
                 )
             except Exception as e:
                 st.error("Document Processor\n\nStatus: Error")
                 logger.error(f"Error getting document processor status: {str(e)}")
 
     def _render_log_viewer(self) -> None:
-        """Rendert den Log-Viewer mit Filterfunktionen."""
+        """
+        Rendert den Log-Viewer mit erweiterten Filterfunktionen.
+        
+        Features:
+        - Filterung nach Log-Level und Service
+        - Automatische Aktualisierung
+        - Debug-Informationen im Debug-Mode
+        - Fehlerbehandlung mit benutzerfreundlichen Meldungen
+        """
         st.markdown("### 📋 Log Viewer")
         
-        # Log Level Filter
+        # Log Level und Source Filter in Columns
         col1, col2, col3 = st.columns([2,2,6])
+        
         with col1:
             log_level = st.selectbox(
                 "Log Level",
                 ["ALL", "DEBUG", "INFO", "WARNING", "ERROR"],
-                index=0
+                index=0,
+                help="Filtere Logs nach ihrer Wichtigkeit"
             )
         
         with col2:
             log_source = st.selectbox(
                 "Source",
                 ["ALL", "chat_service", "database", "document_processor"],
-                index=0
+                index=0,
+                help="Filtere Logs nach ihrer Quelle"
+            )
+            
+        with col3:
+            auto_refresh = st.toggle(
+                "Auto-Refresh",
+                value=False,
+                help="Aktualisiert die Logs automatisch alle 30 Sekunden"
             )
 
         # Log Datei laden und filtern
         try:
-            log_path = Path("logs") / datetime.now().strftime("%Y-%m") / "app.log"
+            # Korrekten Log-Pfad für aktuelles Monat erstellen
+            current_month_dir = datetime.now().strftime("%Y-%m")
+            log_path = Path("logs") / current_month_dir / "app.log"
+            
             if log_path.exists():
-                with log_path.open() as f:
-                    logs = f.readlines()[-100:]  # Letzte 100 Zeilen
+                with log_path.open(encoding='utf-8') as f:
+                    # Lese die letzten 100 Zeilen
+                    # TODO: Mach dies konfigurierbar über ein Slider-Widget
+                    logs = f.readlines()[-100:]
                 
-                # Logs filtern
+                # Logs filtern basierend auf Benutzerauswahl
                 filtered_logs = []
                 for log in logs:
-                    if log_level != "ALL" and f"[{log_level}]" not in log:
-                        continue
-                    if log_source != "ALL" and log_source not in log:
-                        continue
-                    filtered_logs.append(log)
+                    try:
+                        # Prüfe Log-Level Filter
+                        if log_level != "ALL" and f"[{log_level}]" not in log:
+                            continue
+                            
+                        # Prüfe Source Filter
+                        if log_source != "ALL" and log_source not in log:
+                            continue
+                            
+                        filtered_logs.append(log)
+                    except Exception as e:
+                        self.logger.error(f"Fehler beim Filtern des Logs: {str(e)}")
                 
                 # Logs anzeigen
-                st.code("".join(filtered_logs), language="text")
+                if filtered_logs:
+                    log_container = st.container()
+                    with log_container:
+                        st.code("".join(filtered_logs), language="text")
+                        
+                    # Auto-Refresh wenn aktiviert
+                    if auto_refresh:
+                        st.rerun()
+                else:
+                    st.info("Keine Logs für die gewählten Filter gefunden")
             else:
-                st.warning("Keine Log-Datei gefunden")
+                st.info(f"Keine Log-Datei gefunden unter: {log_path}")
+                
+                # Debug-Informationen anzeigen wenn Debug-Mode aktiv
+                if st.session_state.get("debug_mode"):
+                    with st.expander("Debug Info"):
+                        st.markdown(f"""
+                        **Log File Details:**
+                        - Gesuchter Pfad: `{log_path}`
+                        - Existiert logs/: `{Path("logs").exists()}`
+                        - Existiert logs/{current_month_dir}/: `{(Path("logs") / current_month_dir).exists()}`
+                        """)
         except Exception as e:
-            st.error(f"Fehler beim Lesen der Logs: {str(e)}")
+            st.error("🚫 Fehler beim Lesen der Logs")
+            if st.session_state.get("debug_mode"):
+                st.exception(e)
+            log_error_with_context(
+                self.logger,
+                e,
+                {
+                    "log_path": str(log_path),
+                    "log_level": log_level,
+                    "log_source": log_source
+                },
+                "Fehler beim Laden der Logs"
+            )
 
-    def _render_performance_metrics(self) -> None:
-        """Rendert Performance-Metriken und Graphen."""
-        st.markdown("### 📈 Performance Metrics")
-        
-        # Performance Metriken
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Response Time Graph
-            fig = go.Figure()
-            # Beispieldaten - in Produktion durch echte Metriken ersetzen
-            times = [(datetime.now() - timedelta(minutes=x)).strftime('%H:%M') 
-                    for x in range(30, 0, -1)]
-            response_times = [1.2, 1.1, 1.3, 1.0, 1.4, 1.2, 1.1, 1.3, 1.2, 1.1,
-                            1.2, 1.1, 1.0, 1.2, 1.3, 1.1, 1.2, 1.1, 1.3, 1.2,
-                            1.1, 1.2, 1.3, 1.1, 1.2, 1.1, 1.0, 1.2, 1.1, 1.3]
-            
-            fig.add_trace(go.Scatter(
-                x=times,
-                y=response_times,
-                mode='lines+markers',
-                name='Response Time (s)'
-            ))
-            fig.update_layout(
-                title="Response Times",
-                xaxis_title="Time",
-                yaxis_title="Seconds"
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            # Memory Usage
-            fig = go.Figure()
-            memory_usage = [42, 45, 43, 47, 44, 46, 45, 48, 46, 45,
-                          47, 46, 44, 45, 46, 47, 45, 46, 48, 47,
-                          45, 46, 47, 45, 46, 44, 45, 46, 47, 45]
-            
-            fig.add_trace(go.Scatter(
-                x=times,
-                y=memory_usage,
-                mode='lines+markers',
-                name='Memory Usage (%)'
-            ))
-            fig.update_layout(
-                title="Memory Usage",
-                xaxis_title="Time",
-                yaxis_title="Usage (%)"
-            )
-            st.plotly_chart(fig, use_container_width=True)
+    
 
     def _render_developer_tools(self) -> None:
-        """Rendert Entwickler-Werkzeuge und Quick Actions."""
+        """
+        Rendert Entwickler-Werkzeuge und Quick Actions.
+        Bietet schnellen Zugriff auf wichtige Entwicklerfunktionen.
+        """
         st.markdown("### 🛠️ Developer Tools")
         
         col1, col2, col3, col4 = st.columns(4)
@@ -243,20 +277,27 @@ class DeveloperDashboard:
                 st.success("Config reloaded!")
         
         with col4:
-            debug_mode = st.toggle("🐛 Debug Mode", value=st.session_state.get("debug_mode", False))
+            debug_mode = st.toggle(
+                "🐛 Debug Mode",
+                value=st.session_state.get("debug_mode", False),
+                help="Aktiviert erweiterte Debugging-Funktionen"
+            )
             if debug_mode != st.session_state.get("debug_mode"):
                 st.session_state.debug_mode = debug_mode
                 st.success(f"Debug Mode: {'Enabled' if debug_mode else 'Disabled'}")
 
     def _render_system_info(self) -> None:
-        """Rendert System-Informationen und Konfiguration."""
+        """
+        Rendert System-Informationen und Konfiguration.
+        Zeigt detaillierte Informationen über das System und den aktuellen Zustand.
+        """
         st.markdown("### ⚙️ System Information")
         
         # Config anzeigen
         with st.expander("Current Configuration"):
             st.json(settings.dict())
         
-        # Session State anzeigen
+        # Session State anzeigen (gefiltert)
         with st.expander("Session State"):
             # Sensitive Daten filtern
             safe_state = {
@@ -268,7 +309,10 @@ class DeveloperDashboard:
 
     @log_function_call(logger)
     async def render(self) -> None:
-        """Rendert das komplette Dashboard."""
+        """
+        Rendert das komplette Dashboard.
+        Koordiniert das Rendering aller Dashboard-Komponenten und behandelt Fehler.
+        """
         try:
             # Services initialisieren
             if not await self.initialize():
@@ -283,15 +327,8 @@ class DeveloperDashboard:
             self._render_service_status()
             st.divider()
             
-            # Zwei-Spalten-Layout für Logs und Performance
-            col1, col2 = st.columns([3, 2])
-            
-            with col1:
-                self._render_log_viewer()
-            
-            with col2:
-                self._render_performance_metrics()
-            
+            # Log Viewer in voller Breite
+            self._render_log_viewer()
             st.divider()
             
             self._render_developer_tools()
@@ -313,8 +350,13 @@ class DeveloperDashboard:
                 "🚫 Fehler beim Laden des Dashboards. "
                 "Bitte versuchen Sie es später erneut."
             )
+            
+            # Im Debug-Mode zusätzliche Fehlerinformationen anzeigen
+            if st.session_state.get("debug_mode"):
+                st.exception(e)
 
-# Dashboard-Instanz erstellen und rendern
+
+# Dashboard-Instanz erstellen und rendern wenn Skript direkt ausgeführt wird
 if __name__ == "__main__":
     dashboard = DeveloperDashboard()
     asyncio.run(dashboard.render())

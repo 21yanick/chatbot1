@@ -176,13 +176,6 @@ class ChatApplication:
             tab1, tab2 = st.tabs(["🎨 Darstellung", "🛠️ Erweitert"])
             
             with tab1:
-                # Theme-Auswahl
-                theme = st.selectbox(
-                    "Design",
-                    ["System", "Hell", "Dunkel"],
-                    help="Wählen Sie das Erscheinungsbild der Anwendung"
-                )
-                
                 # Chat-Darstellung
                 st.session_state.show_timestamps = st.toggle(
                     "Zeitstempel anzeigen",
@@ -193,7 +186,7 @@ class ChatApplication:
                     "Quellen automatisch ausklappen",
                     value=st.session_state.get("show_sources", False)
                 )
-            
+                
             with tab2:
                 # Debug-Modus
                 debug_mode = st.toggle(
@@ -258,7 +251,6 @@ class ChatApplication:
                             "errors": metrics['errors_occurred']
                         },
                         "system": {
-                            "theme": theme,
                             "timestamps": st.session_state.get('show_timestamps'),
                             "sources": st.session_state.get('show_sources')
                         }
