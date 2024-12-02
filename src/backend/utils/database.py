@@ -224,22 +224,35 @@ class ChromaDBManager:
         try:
             with log_execution_time(self.logger, "query_documents"):
                 with request_context():
-                    results = self.collection.query(
-                        query_embeddings=query_embeddings,
-                        n_results=n_results,
-                        where=where
+                    if not query_embeddings:
+                        # Wenn keine Embeddings übergeben wurden, führe Metadaten-Suche durch
+                        results = self.collection.get(
+                            where=where
+                        )
+                    else:
+                        results = self.collection.query(
+                            query_embeddings=query_embeddings,
+                            n_results=n_results,
+                            where=where
+                        )
+            
+                    # Ergebnisse in einheitliches Format bringen
+                    formatted_results = {
+                        'ids': results['ids'] if isinstance(results['ids'], list) else [results['ids']],
+                        'documents': results['documents'] if isinstance(results['documents'], list) else [results['documents']],
+                        'metadatas': results['metadatas'] if isinstance(results['metadatas'], list) else [results['metadatas']]
+                    }
+            
+                    self.logger.info(
+                        f"Suchanfrage ausgeführt",
+                        extra={
+                            'n_results': n_results,
+                            'filter_applied': bool(where),
+                            'results_found': len(formatted_results['ids'])
+                        }
                     )
             
-            self.logger.info(
-                f"Suchanfrage ausgeführt",
-                extra={
-                    "n_results": n_results,
-                    "filter_applied": bool(where),
-                    "results_found": len(results.get("ids", []))
-                }
-            )
-            
-            return results
+                    return formatted_results
             
         except Exception as e:
             error_context = {

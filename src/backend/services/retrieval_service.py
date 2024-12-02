@@ -4,6 +4,7 @@ Verantwortlich für die semantische Suche und Verwaltung von Dokumenten
 mit ChromaDB-Integration.
 """
 
+from datetime import datetime
 from typing import List, Dict, Any, Optional
 import asyncio
 from functools import lru_cache
@@ -275,7 +276,7 @@ class RetrievalServiceImpl(RetrievalService):
                     where={"original_id": document_id}
                 )
                 
-                if not results or not results.get("documents"):
+                if not results or not results.get('documents') or not results['documents']:
                     self.logger.warning(
                         "Dokument nicht gefunden",
                         extra={"document_id": document_id}
@@ -283,19 +284,27 @@ class RetrievalServiceImpl(RetrievalService):
                     return None
                 
                 # Dokument rekonstruieren
-                document = await self._reconstruct_document(results, document_id)
+                try:
+                    document = await self._reconstruct_document(results, document_id)
+                except Exception as e:
+                    self.logger.error(
+                        f"Fehler bei Dokumentrekonstruktion: {str(e)}",
+                        extra={"document_id": document_id}
+                    )
+                    return None
                 
                 # Cache aktualisieren
-                async with self._cache_lock:
-                    self._document_cache[document_id] = document
+                if document:
+                    async with self._cache_lock:
+                        self._document_cache[document_id] = document
                 
-                self.logger.info(
-                    "Dokument abgerufen",
-                    extra={
-                        "document_id": document_id,
-                        "content_length": len(document.content)
-                    }
-                )
+                    self.logger.info(
+                        "Dokument abgerufen",
+                        extra={
+                            "document_id": document_id,
+                            "content_length": len(document.content)
+                        }
+                    )
                 return document
             
         except Exception as e:
@@ -312,7 +321,7 @@ class RetrievalServiceImpl(RetrievalService):
     async def search_documents(
         self,
         query: str,
-        limit: int = 5,
+        limit: int = 3,
         metadata_filter: Optional[Dict[str, Any]] = None
     ) -> List[Document]:
         """
@@ -340,7 +349,7 @@ class RetrievalServiceImpl(RetrievalService):
             with request_context():
                 with log_execution_time(self.logger, "document_search"):
                     # Collection-Größe prüfen und Limit anpassen
-                    collection_size = self.collection.count()
+                    collection_size = self.db.collection.count()
                     if collection_size == 0:
                         self.logger.warning(
                             "Suche in leerer Collection",
@@ -370,7 +379,7 @@ class RetrievalServiceImpl(RetrievalService):
                     )
                 
                     # Ergebnisse prüfen
-                    if not results or not results.get("documents"):
+                    if not results or not results['documents'] or not results['documents'][0]:
                         self.logger.info(
                             "Keine relevanten Dokumente gefunden",
                             extra={
@@ -537,11 +546,24 @@ class RetrievalServiceImpl(RetrievalService):
                     results["documents"],
                     results["metadatas"]
                 )):
+                    # Stelle sicher, dass metadata ein Dictionary ist
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    
+                    # Stelle sicher, dass topics eine Liste ist
+                    if "topics" in metadata and not isinstance(metadata["topics"], list):
+                        metadata["topics"] = []
+                    
+                    # Erstelle einen Chunk mit allen erforderlichen Feldern
                     chunk = Document(
                         id=doc_id,
+                        title=metadata.get("title", f"Chunk {i+1}"),
                         content=content,
+                        source_link=metadata.get("source_link", f"https://default-source/{doc_id}"),
+                        document_type=metadata.get("document_type", "sonstiges"),
                         metadata=metadata,
-                        created_at=metadata.get("created_at")
+                        created_at=metadata.get("created_at"),
+                        topics=metadata.get("topics", [])  # Stelle sicher, dass es eine Liste ist
                     )
                     chunks.append(chunk)
                 
@@ -549,10 +571,14 @@ class RetrievalServiceImpl(RetrievalService):
                 chunks.sort(key=lambda x: x.metadata.get("chunk_index", 0))
                 combined_content = " ".join(chunk.content for chunk in chunks)
                 
-                # Dokument erstellen
-                metadata = chunks[0].metadata.copy()
-                metadata.pop("chunk_index", None)
-                metadata.pop("total_chunks", None)
+                # Metadaten vom ersten Chunk als Basis nehmen
+                base_metadata = chunks[0].metadata.copy() if chunks else {}
+                base_metadata.pop("chunk_index", None)
+                base_metadata.pop("total_chunks", None)
+                
+                # Stelle sicher, dass topics im base_metadata eine Liste ist
+                if "topics" in base_metadata and not isinstance(base_metadata["topics"], list):
+                    base_metadata["topics"] = []
                 
                 self.logger.debug(
                     "Dokument rekonstruiert",
@@ -562,11 +588,20 @@ class RetrievalServiceImpl(RetrievalService):
                     }
                 )
                 
+                # Erstelle das rekonstruierte Dokument mit allen erforderlichen Feldern
                 return Document(
                     id=document_id,
+                    title=base_metadata.get("title", f"Dokument {document_id[:8]}"),
                     content=combined_content,
-                    metadata=metadata,
-                    created_at=chunks[0].created_at
+                    source_link=base_metadata.get("source_link", f"https://default-source/{document_id}"),
+                    document_type=base_metadata.get("document_type", "sonstiges"),
+                    metadata=base_metadata,
+                    created_at=chunks[0].created_at if chunks else None,
+                    language=base_metadata.get("language", "de"),
+                    topics=base_metadata.get("topics", []),  # Stelle sicher, dass es eine Liste ist
+                    category=base_metadata.get("category"),
+                    validation_score=base_metadata.get("validation_score", 1.0),
+                    importance_score=base_metadata.get("importance_score", 1.0)
                 )
                 
         except Exception as e:
@@ -595,24 +630,79 @@ class RetrievalServiceImpl(RetrievalService):
         try:
             with log_execution_time(self.logger, "result_processing"):
                 documents = []
-                for i, (doc_id, content, metadata) in enumerate(zip(
-                    results["ids"],
-                    results["documents"],
-                    results["metadatas"]
-                )):
-                    original_id = metadata.get("original_id", doc_id)
-                    if original_id != doc_id:
-                        doc = await self.get_document(original_id)
-                        if doc:
-                            documents.append(doc)
-                    else:
-                        doc = Document(
-                            id=doc_id,
-                            content=content,
-                            metadata=metadata,
-                            created_at=metadata.get("created_at")
+                
+                # Sicherstellen, dass wir gültige Ergebnisse haben
+                if not results or 'ids' not in results:
+                    self.logger.warning("Keine gültigen Suchergebnisse gefunden")
+                    return []
+
+                # ChromaDB gibt verschachtelte Listen zurück - erste Liste extrahieren
+                ids = results['ids'][0] if results['ids'] else []
+                documents_content = results['documents'][0] if results['documents'] else []
+                metadatas = results['metadatas'][0] if results['metadatas'] else []
+
+                # Überprüfe ob wir überhaupt Ergebnisse haben
+                if not ids:
+                    self.logger.warning("Keine IDs in den Suchergebnissen gefunden")
+                    return []
+
+                # Iteriere über die Ergebnisse
+                for i in range(len(ids)):
+                    try:
+                        doc_id = ids[i]
+                        content = documents_content[i] if i < len(documents_content) else ""
+                        metadata = metadatas[i] if i < len(metadatas) else {}
+
+                        # Überprüfe, ob es sich um einen Chunk handelt
+                        original_id = metadata.get("original_id") if isinstance(metadata, dict) else None
+                        if original_id:
+                            doc = await self.get_document(original_id)
+                            if doc:
+                                documents.append(doc)
+                        else:
+                            # Stelle sicher, dass metadata ein Dictionary ist
+                            if not isinstance(metadata, dict):
+                                metadata = {}
+                                
+                            # Extrahiere die erforderlichen Felder aus den Metadaten
+                            # Verwende die Metadaten aus dem ursprünglichen Dokument
+                            try:
+                                document_metadata = metadata.get("metadata", {})
+                                
+                                doc = Document(
+                                    id=doc_id,
+                                    title=document_metadata.get("title", metadata.get("title", f"Dokument {doc_id[:8]}")),
+                                    content=content,
+                                    source_link=document_metadata.get("source_link", metadata.get("source_link", f"https://default-source/{doc_id}")),
+                                    document_type=document_metadata.get("document_type", metadata.get("document_type", "sonstiges")),
+                                    created_at=metadata.get("created_at", datetime.utcnow()),
+                                    metadata=metadata,
+                                    language=metadata.get("language", "de"),
+                                    topics=metadata.get("topics", []),
+                                    category=metadata.get("category"),
+                                    validation_score=metadata.get("validation_score", 1.0),
+                                    importance_score=metadata.get("importance_score", 1.0)
+                                )
+                                documents.append(doc)
+                            except Exception as e:
+                                self.logger.error(
+                                    f"Fehler bei Dokumentrekonstruktion: {str(e)}",
+                                    extra={
+                                        "doc_id": doc_id,
+                                        "metadata": metadata
+                                    }
+                                )
+                                continue
+
+                    except Exception as e:
+                        self.logger.error(
+                            f"Fehler bei der Verarbeitung eines einzelnen Ergebnisses: {str(e)}",
+                            extra={
+                                "index": i,
+                                "error": str(e)
+                            }
                         )
-                        documents.append(doc)
+                        continue
                 
                 self.logger.debug(
                     "Suchergebnisse verarbeitet",

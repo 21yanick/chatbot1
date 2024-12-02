@@ -111,7 +111,7 @@ class ChatSettings(BaseModel):
         description="Maximale Token-Anzahl pro Antwort"
     )
     temperature: float = Field(
-        default=0.7,
+        default=0.1,
         description="Kreativität der Antworten (0.0-1.0)"
     )
     stream_response: bool = Field(

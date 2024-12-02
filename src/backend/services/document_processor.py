@@ -302,9 +302,11 @@ class DocumentProcessor(BaseService):
                         
                         doc_chunks.append(Document(
                             id=f"{document.id}_chunk_{i}",
+                            title=f"{document.title} (Chunk {i+1}/{len(chunks)})",
                             content=chunk,
+                            source_link=document.source_link,  # Hier korrigiert von source zu source_link
+                            document_type=document.document_type,
                             metadata=chunk_metadata,
-                            source=document.source,
                             created_at=document.created_at
                         ))
                     

@@ -4,8 +4,9 @@ Definiert das Datenmodell für Dokumente im System.
 """
 
 from datetime import datetime
-from typing import Optional, Dict, Any
-from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any, List
+from pydantic import BaseModel, Field, validator
+from enum import Enum
 
 from src.config.settings import settings
 from src.config.logging_config import (
@@ -19,6 +20,33 @@ from src.config.logging_config import (
 # Logger für dieses Modul initialisieren
 logger = get_logger(__name__)
 
+class DocumentType(str, Enum):
+    """Enum für verschiedene Dokumenttypen."""
+    GESETZ = "gesetz"
+    VERORDNUNG = "verordnung"
+    RICHTLINIE = "richtlinie"
+    ANLEITUNG = "anleitung"
+    HANDBUCH = "handbuch"
+    ARTIKEL = "artikel"
+    SONSTIGES = "sonstiges"
+
+class DocumentStatus(str, Enum):
+    """Enum für Dokumentstatus."""
+    PENDING = "pending"         # Warten auf Verarbeitung
+    PROCESSING = "processing"   # Wird verarbeitet
+    COMPLETED = "completed"     # Verarbeitung abgeschlossen
+    FAILED = "failed"          # Verarbeitung fehlgeschlagen
+    ARCHIVED = "archived"      # Archiviert
+
+class ChunkMetadata(BaseModel):
+    """Metadaten für einen einzelnen Dokument-Chunk."""
+    chunk_index: int = Field(..., description="Position des Chunks im Originaldokument")
+    total_chunks: int = Field(..., description="Gesamtanzahl der Chunks im Dokument")
+    chunk_type: str = Field("paragraph", description="Art des Chunks (z.B. paragraph, section)")
+    section: Optional[str] = Field(None, description="Abschnitt/Paragraph Referenz")
+    start_char: int = Field(..., description="Startposition im Originaldokument")
+    end_char: int = Field(..., description="Endposition im Originaldokument")
+
 class Document(BaseModel):
     """
     Basis-Dokumentenmodell für Inhalt und Metadaten.
@@ -27,17 +55,35 @@ class Document(BaseModel):
     Metadaten und zugehörigen Zeitstempeln.
     """
     
+    # Basis-Felder
     id: str = Field(
         ..., 
         description="Eindeutige Dokument-ID"
+    )
+    title: str = Field(
+        ...,
+        description="Titel des Dokuments",
+        min_length=3
     )
     content: str = Field(
         ..., 
         description="Hauptinhalt des Dokuments"
     )
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Zusätzliche Dokument-Metadaten"
+    
+    # Pflichtmetadaten
+    source_link: str = Field(
+        ...,
+        description="Link zum Originaldokument (zwingend erforderlich)"
+    )
+    document_type: DocumentType = Field(
+        ...,
+        description="Typ des Dokuments"
+    )
+    
+    # Status und Tracking
+    status: DocumentStatus = Field(
+        default=DocumentStatus.PENDING,
+        description="Aktueller Status des Dokuments"
     )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
@@ -47,10 +93,79 @@ class Document(BaseModel):
         default=None,
         description="Zeitpunkt der letzten Aktualisierung"
     )
-    source: Optional[str] = Field(
+    last_validated: Optional[datetime] = Field(
         default=None,
-        description="Quelle des Dokuments"
+        description="Zeitpunkt der letzten Validierung"
     )
+    
+    # Kategorisierung
+    category: Optional[str] = Field(
+        default=None,
+        description="Hauptkategorie des Dokuments"
+    )
+    topics: List[str] = Field(
+        default_factory=list,
+        description="Liste der Themen/Tags"
+    )
+    language: str = Field(
+        default="de",
+        description="Sprache des Dokuments (ISO 639-1)"
+    )
+    
+    # Chunking
+    chunk_metadata: Optional[ChunkMetadata] = Field(
+        default=None,
+        description="Metadaten für Dokument-Chunks"
+    )
+    original_doc_id: Optional[str] = Field(
+        default=None,
+        description="ID des Originaldokuments falls dies ein Chunk ist"
+    )
+    
+    # Beziehungen
+    related_docs: List[str] = Field(
+        default_factory=list,
+        description="IDs verwandter Dokumente"
+    )
+    prerequisites: List[str] = Field(
+        default_factory=list,
+        description="IDs vorausgesetzter Dokumente"
+    )
+    supersedes: List[str] = Field(
+        default_factory=list,
+        description="IDs von Dokumenten die dieses ersetzt"
+    )
+    
+    # Ranking und Statistiken
+    importance_score: float = Field(
+        default=1.0,
+        description="Wichtigkeits-Score des Dokuments",
+        ge=0.0,
+        le=1.0
+    )
+    validation_score: float = Field(
+        default=1.0,
+        description="Validierungs-Score",
+        ge=0.0,
+        le=1.0
+    )
+    usage_count: int = Field(
+        default=0,
+        description="Nutzungszähler"
+    )
+    
+    # Zusätzliche Metadaten
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Zusätzliche Dokument-Metadaten"
+    )
+    
+    @validator('source_link')
+    def validate_source_link(cls, v):
+        """Validiert den Source-Link."""
+        if not v.startswith(('http://', 'https://')):
+            raise ValueError('source_link muss eine gültige HTTP(S) URL sein')
+        return v
     
     @log_function_call(logger)
     def update_content(self, new_content: str) -> None:
@@ -126,6 +241,13 @@ class Document(BaseModel):
             raise
 
     @log_function_call(logger)
+    def increment_usage(self) -> None:
+        """Erhöht den Nutzungszähler des Dokuments."""
+        self.usage_count += 1
+        self.updated_at = datetime.utcnow()
+        logger.debug(f"Nutzungszähler erhöht für Dokument {self.id}: {self.usage_count}")
+
+    @log_function_call(logger)
     def to_embedding_format(self) -> Dict[str, Any]:
         """
         Konvertiert das Dokument in ein Format für Embedding-Speicherung.
@@ -140,14 +262,33 @@ class Document(BaseModel):
         try:
             formatted_doc = {
                 "id": self.id,
+                "title": self.title,
                 "content": self.content,
                 "metadata": {
-                    **self.metadata,
+                    "source_link": self.source_link,
+                    "document_type": self.document_type.value,
+                    "status": self.status.value,
                     "created_at": self.created_at.isoformat(),
                     "updated_at": self.updated_at.isoformat() if self.updated_at else None,
-                    "source": self.source
+                    "category": self.category,
+                    "topics": self.topics,
+                    "language": self.language,
+                    "importance_score": self.importance_score,
+                    "validation_score": self.validation_score,
+                    "usage_count": self.usage_count,
+                    **self.metadata
                 }
             }
+            
+            # Chunk-spezifische Metadaten hinzufügen falls vorhanden
+            if self.chunk_metadata:
+                formatted_doc["metadata"].update({
+                    "chunk_index": self.chunk_metadata.chunk_index,
+                    "total_chunks": self.chunk_metadata.total_chunks,
+                    "chunk_type": self.chunk_metadata.chunk_type,
+                    "section": self.chunk_metadata.section,
+                    "original_doc_id": self.original_doc_id
+                })
             
             logger.debug(
                 "Dokument zu Embedding-Format konvertiert",
@@ -172,9 +313,10 @@ class Document(BaseModel):
     def __str__(self) -> str:
         """String-Repräsentation des Dokuments."""
         return (
-            f"Document {self.id} "
-            f"(Quelle: {self.source or 'Unbekannt'}, "
-            f"Länge: {len(self.content)} Zeichen)"
+            f"Document {self.id} - {self.title} "
+            f"(Typ: {self.document_type.value}, "
+            f"Status: {self.status.value}, "
+            f"Sprache: {self.language})"
         )
     
     class Config:
