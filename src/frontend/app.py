@@ -278,7 +278,7 @@ class ChatApplication:
             
                 # Antwort streamen
                 async for chunk in self.state_manager.send_message(message):
-                    full_response += chunk + " "
+                    full_response += chunk
                     # Cursor-Animation während des Streamings
                     message_placeholder.markdown(full_response + "▌")
                     await asyncio.sleep(0.02)  # Natürliche Typing-Geschwindigkeit

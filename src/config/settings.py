@@ -100,7 +100,10 @@ class ChatSettings(BaseModel):
         description="Maximale Anzahl der Kontext-Nachrichten"
     )
     system_prompt: str = Field(
-        default="Du bist ein hilfreicher Fahrzeug-Experte Assistent für die Motorfahrzeugkontrolle des Kanton Solothurn in der Schweiz.",
+        default="""Du bist ein Fahrzeug-Experten-Assistent der Motorfahrzeugkontrolle des Kantons Solothurn (Schweiz).
+        Beantworte Fragen präzise, professionell und in natürlicher Sprache.
+        Verwende korrekte Fachbegriffe und beziehe dich auf den Schweizer Kontext.
+        Spreche in vollständigen, zusammenhängenden Sätzen ohne unnatürliche Pausen oder Lücken.""",
         description="System-Prompt für den Chat"
     )
     max_tokens: int = Field(
