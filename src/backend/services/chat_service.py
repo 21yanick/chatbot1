@@ -72,6 +72,7 @@ class ChatServiceImpl(ChatService):
             with log_execution_time(self.logger, "chat_service_initialization"):
                 await self.retrieval_service.initialize()
                 self._llm = ChatOpenAI(
+                    api_key=settings.openai_api_key,
                     model_name=self.model_name,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens
@@ -558,6 +559,7 @@ class ChatServiceImpl(ChatService):
                 
                     # Streaming LLM konfigurieren
                     streaming_llm = ChatOpenAI(
+                        api_key=settings.openai_api_key,
                         model_name=self.model_name,
                         temperature=self.temperature,
                         max_tokens=self.max_tokens,

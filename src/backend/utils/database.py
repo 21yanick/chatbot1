@@ -56,13 +56,13 @@ class ChromaDBManager:
     async def initialize(self) -> None:
         """
         Initialisiert ChromaDB-Client und Collection mit optimierten Einstellungen.
-    
+
         Diese Methode:
         1. Stellt sicher, dass das Persistenz-Verzeichnis existiert
         2. Initialisiert den ChromaDB-Client mit angepassten Einstellungen
-        3. Erstellt oder lädt eine Collection mit optimierten HNSW-Parametern
+        3. Erstellt oder lädt eine Collection
         4. Konfiguriert Logging und Telemetrie
-    
+
         Raises:
             DatabaseError: Bei Fehlern während der Initialisierung, z.B.:
                 - Verzeichnis nicht beschreibbar
@@ -91,15 +91,10 @@ class ChromaDBManager:
                     )
                 )
             
-                # Collection mit optimierten HNSW-Parametern erstellen/laden
+                # Collection erstellen/laden mit Basis-Einstellungen
                 self._collection = self._client.get_or_create_collection(
                     name=self.collection_name,
-                    metadata={
-                        "hnsw:space": "cosine",  # Cosine-Ähnlichkeit für Embeddings
-                        "hnsw:construction_ef": 100,  # Höhere Genauigkeit beim Aufbau
-                        "hnsw:search_ef": 50,    # Balancierte Suche
-                        "hnsw:m": 16,            # Nachbarschaftsgröße
-                    }
+                    metadata={"description": "Document collection for vehicle expert chatbot"}
                 )
             
                 self.logger.info(

@@ -149,7 +149,8 @@ class EmbeddingService(BaseService):
             with log_execution_time(self.logger, "embedding_initialization"):
                 if not self._embeddings:
                     self._embeddings = OpenAIEmbeddings(
-                        model=self.model
+                        model=self.model,
+                        openai_api_key=settings.openai_api_key
                     )
                     
             self.logger.info(
