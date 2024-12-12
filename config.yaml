@@ -1,0 +1,22 @@
+database:
+  persist_directory: "./data/chromadb"
+  collection_name: "documents"
+
+chat:
+  max_context_messages: 10
+  model: "gpt-3.5-turbo"  # oder welches Modell du verwendest
+
+logging:
+  level: "INFO"
+  file: "./logs/app.log"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+
+streamlit:
+  theme:
+    primaryColor: "#FF4B4B"
+    backgroundColor: "#FFFFFF"
+    secondaryBackgroundColor: "#F0F2F6"
+    textColor: "#262730"

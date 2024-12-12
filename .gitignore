@@ -1,3 +1,8 @@
+# Environments
+.env
+venv/
+ENV/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -17,38 +22,19 @@ sdist/
 var/
 wheels/
 *.egg-info/
-.installed.cfg
-*.egg
 
-# Virtual Environment
-venv/
-ENV/
-env/
-.env
+# Project specific
+data/chromadb/
+logs/
+.pytest_cache/
+/test
 
-# IDEs
-.idea/
+# IDE
 .vscode/
+.idea/
 *.swp
 *.swo
 
-# Logs
-logs/
-*.log
-
-# Local Development
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Data
-data/processed/
-data/raw/
-*.db
-chromadb/
-
-# Testing
-.coverage
-htmlcov/
-.pytest_cache/
+# OS specific
+.DS_Store
+Thumbs.db
