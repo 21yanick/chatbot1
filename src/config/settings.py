@@ -99,6 +99,10 @@ class ChatSettings(BaseModel):
         default=10,
         description="Maximale Anzahl der Kontext-Nachrichten"
     )
+    max_context_length: int = Field(  # Diese Zeile hinzufügen
+        default=4000,
+        description="Maximale Länge des Dokumenten-Kontexts in Zeichen"
+    )
     system_prompt: str = Field(
         default="""Du bist ein Fahrzeug-Experten-Assistent der Motorfahrzeugkontrolle des Kantons Solothurn (Schweiz).
         Beantworte Fragen präzise, professionell und in natürlicher Sprache.

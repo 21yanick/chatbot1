@@ -15,7 +15,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from src.backend.models.chat import Message, ChatSession
-from src.backend.services.chat_service import ChatServiceImpl
+from src.backend.services.chat.chat_service import ChatServiceImpl
 from src.backend.services.retrieval_service import RetrievalServiceImpl
 from src.backend.services.embedding_service import EmbeddingService
 from src.backend.services.document_processor import DocumentProcessor
