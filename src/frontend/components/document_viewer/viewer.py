@@ -13,7 +13,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 from src.backend.models.document import Document
-from src.backend.services.retrieval_service import RetrievalServiceImpl
+from src.backend.services.retrieval.retrieval_service import RetrievalServiceImpl
 from src.config.settings import settings
 from src.config.logging_config import (
     get_logger,

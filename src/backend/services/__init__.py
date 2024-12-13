@@ -1,13 +1,15 @@
 # src/backend/services/__init__.py
 
-from .embedding_service import EmbeddingService
+"""Services package initialization."""
+
+from .chat.chat_service import ChatServiceImpl
+from .retrieval.retrieval_service import RetrievalServiceImpl
 from .document_processor import DocumentProcessor
-from .retrieval_service import RetrievalService
-from .chat.chat_service import ChatService
+from .embedding_service import EmbeddingService
 
 __all__ = [
-    'EmbeddingService',
+    'ChatServiceImpl',
+    'RetrievalServiceImpl',
     'DocumentProcessor',
-    'RetrievalService',
-    'ChatService'
+    'EmbeddingService'
 ]

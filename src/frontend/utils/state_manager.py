@@ -16,9 +16,10 @@ from uuid import uuid4
 
 from src.backend.models.chat import Message, ChatSession
 from src.backend.services.chat.chat_service import ChatServiceImpl
-from src.backend.services.retrieval_service import RetrievalServiceImpl
+from src.backend.services.retrieval.retrieval_service import RetrievalServiceImpl
 from src.backend.services.embedding_service import EmbeddingService
 from src.backend.services.document_processor import DocumentProcessor
+from src.backend.utils.database import ChromaDBManager
 from src.config.settings import settings
 from src.config.logging_config import (
     get_logger,
@@ -139,11 +140,17 @@ class StateManager:
         with log_execution_time(self.logger, "service_creation"):
             # Services erstellen
             embedding_service = EmbeddingService()
-            document_processor = DocumentProcessor()
+            document_processor = DocumentProcessor()  # Wir behalten dies für andere Services
+            
+            # ChromaDB Manager erstellen
+            db_manager = ChromaDBManager()
+            
+            # Retrieval Service mit neuer Struktur initialisieren
             retrieval_service = RetrievalServiceImpl(
                 embedding_service=embedding_service,
-                document_processor=document_processor
+                db_manager=db_manager  # Optional, falls nicht als default im Service
             )
+            
             chat_service = ChatServiceImpl(
                 retrieval_service=retrieval_service
             )
